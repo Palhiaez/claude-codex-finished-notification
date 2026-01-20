@@ -1,4 +1,4 @@
 # Codex CLI notification configuration
 # This script is called when Codex completes an agent turn
 
-notify = ["python3", "/home/qyqiao/scripts/claude-notify/codex_notify.py"]
+notify = ["node", "/home/qyqiao/scripts/claude-notify/notify.js"]

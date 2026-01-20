@@ -11,9 +11,10 @@
  * @param {string} options.content - Message content
  * @param {string} [options.transcriptPath] - Path to transcript file
  * @param {string} [options.cwd] - Working directory
+ * @param {string} [options.source] - Source: 'claude' (green) or 'codex' (blue)
  * @returns {Promise<{success: boolean, error?: string}>}
  */
-export async function sendFeishuNotification({ webhookUrl, title, content, transcriptPath, cwd }) {
+export async function sendFeishuNotification({ webhookUrl, title, content, transcriptPath, cwd, source = 'claude' }) {
   if (!webhookUrl || webhookUrl.includes('YOUR_WEBHOOK_ID')) {
     return { success: false, error: 'Feishu webhook URL not configured' };
   }
@@ -76,7 +77,7 @@ export async function sendFeishuNotification({ webhookUrl, title, content, trans
           tag: 'plain_text',
           content: title
         },
-        template: 'green',
+        template: source === 'codex' ? 'blue' : 'green',
         ud_icon: {
           tag: 'standard_icon',
           token: 'done_outlined'

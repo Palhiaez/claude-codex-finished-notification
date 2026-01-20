@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 
 /**
- * Claude Code Task Completion Notification Script
- * Main entry point for the notification system
+ * AI Coding Assistant Task Completion Notification Script
+ * Unified entry point for Claude Code and Codex CLI notifications
  *
- * Usage: This script is triggered by Claude Code's Stop hook
- * It reads hook data from stdin and sends notifications to configured channels
+ * Usage:
+ *   Claude Code (stdin):  echo '{"event":"stop",...}' | node notify.js
+ *   Codex CLI (argv):     node notify.js '{"type":"agent-turn-complete",...}'
  */
 
 import { readFileSync } from 'node:fs';
@@ -35,14 +36,13 @@ function loadConfig() {
 }
 
 /**
- * Read hook data from stdin
+ * Read hook data from stdin (for Claude Code)
  * @returns {Promise<Object|null>} Parsed hook data or null
  */
 async function readStdin() {
   return new Promise((resolve) => {
     let data = '';
 
-    // Set timeout for stdin read
     const timeout = setTimeout(() => {
       resolve(null);
     }, 3000);
@@ -71,7 +71,6 @@ async function readStdin() {
       resolve(null);
     });
 
-    // Handle case where stdin is already closed
     if (process.stdin.readableEnded) {
       clearTimeout(timeout);
       resolve(null);
@@ -80,7 +79,7 @@ async function readStdin() {
 }
 
 /**
- * Extract summary from transcript if available
+ * Extract summary from Claude Code transcript
  * @param {string} transcriptPath - Path to transcript file
  * @returns {string} Summary or default message
  */
@@ -92,14 +91,11 @@ function extractSummary(transcriptPath) {
   try {
     const content = readFileSync(transcriptPath, 'utf-8');
     const lines = content.trim().split('\n');
-
-    // Get the last few messages to find summary
     const lastMessages = lines.slice(-10).reverse();
 
     for (const line of lastMessages) {
       try {
         const entry = JSON.parse(line);
-        // Look for assistant's final message
         if (entry.type === 'assistant' && entry.message?.content) {
           const textContent = entry.message.content
             .filter(c => c.type === 'text')
@@ -107,7 +103,6 @@ function extractSummary(transcriptPath) {
             .join(' ');
 
           if (textContent.length > 10) {
-            // Truncate if too long
             return textContent.length > 200
               ? textContent.substring(0, 200) + '...'
               : textContent;
@@ -125,17 +120,55 @@ function extractSummary(transcriptPath) {
 }
 
 /**
+ * Parse input from either stdin (Claude) or argv (Codex)
+ * @returns {Promise<{source: string, summary: string, cwd: string, transcriptPath: string|null}>}
+ */
+async function parseInput() {
+  // Check for Codex CLI mode (JSON as command line argument)
+  if (process.argv[2]) {
+    try {
+      const event = JSON.parse(process.argv[2]);
+
+      // Only handle agent-turn-complete events for Codex
+      if (event.type !== 'agent-turn-complete') {
+        process.exit(0);
+      }
+
+      return {
+        source: 'codex',
+        summary: event['last-assistant-message'] || 'Codex CLI session completed',
+        cwd: event.cwd || process.cwd(),
+        transcriptPath: null
+      };
+    } catch {
+      console.error('[Notify] Invalid JSON argument');
+      process.exit(1);
+    }
+  }
+
+  // Claude Code mode (stdin)
+  const hookData = await readStdin();
+  const transcriptPath = hookData?.transcript_path || null;
+
+  return {
+    source: 'claude',
+    summary: extractSummary(transcriptPath),
+    cwd: hookData?.cwd || process.cwd(),
+    transcriptPath
+  };
+}
+
+/**
  * Main function
  */
 async function main() {
   const config = loadConfig();
-  const hookData = await readStdin();
+  const { source, summary, cwd, transcriptPath } = await parseInput();
 
-  const transcriptPath = hookData?.transcript_path || null;
-  const cwd = hookData?.cwd || process.cwd();
-  const summary = extractSummary(transcriptPath);
+  const title = source === 'codex'
+    ? 'Codex CLI Task Completed'
+    : 'Claude Code Task Completed';
 
-  const title = 'Claude Code Task Completed';
   const notifications = [];
 
   // Send Feishu notification
@@ -146,7 +179,8 @@ async function main() {
         title,
         content: summary,
         transcriptPath,
-        cwd
+        cwd,
+        source
       }).then(result => ({ channel: 'Feishu', ...result }))
     );
   }
@@ -157,7 +191,8 @@ async function main() {
       sendWindowsNotification({
         title,
         message: summary,
-        displayMs: config.windows.displayMs
+        displayMs: config.windows.displayMs,
+        source
       }).then(result => ({ channel: 'Windows', ...result }))
     );
   }
@@ -167,10 +202,8 @@ async function main() {
     return;
   }
 
-  // Wait for all notifications
   const results = await Promise.all(notifications);
 
-  // Log results
   for (const result of results) {
     if (result.success) {
       console.log(`[${result.channel}] Notification sent successfully`);
@@ -180,7 +213,6 @@ async function main() {
   }
 }
 
-// Run main
 main().catch(error => {
   console.error('Notification script error:', error.message);
   process.exit(1);

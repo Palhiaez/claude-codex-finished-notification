@@ -11,9 +11,10 @@ import { spawn } from 'node:child_process';
  * @param {string} options.title - Notification title
  * @param {string} options.message - Notification message
  * @param {number} [options.displayMs=5000] - Display duration in milliseconds
+ * @param {string} [options.source] - Source: 'claude' or 'codex'
  * @returns {Promise<{success: boolean, error?: string}>}
  */
-export async function sendWindowsNotification({ title, message, displayMs = 5000 }) {
+export async function sendWindowsNotification({ title, message, displayMs = 5000, source = 'claude' }) {
   // Escape special characters for PowerShell
   const escapeForPowerShell = (str) => {
     return str
@@ -46,7 +47,7 @@ $template = @"
 $xml = New-Object Windows.Data.Xml.Dom.XmlDocument
 $xml.LoadXml($template)
 $toast = [Windows.UI.Notifications.ToastNotification]::new($xml)
-$notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("Claude Code")
+$notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("${source === 'codex' ? 'Codex CLI' : 'Claude Code'}")
 $notifier.Show($toast)
 `;
 
