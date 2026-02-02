@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { writeFileSync, unlinkSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, unlinkSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -18,7 +18,7 @@ function runNotify({ stdin, argv, config } = {}) {
     // Temporarily swap config to disable all channels
     let originalConfig;
     try {
-      originalConfig = require('fs').readFileSync(CONFIG_PATH, 'utf-8');
+      originalConfig = readFileSync(CONFIG_PATH, 'utf-8');
     } catch {
       originalConfig = null;
     }
