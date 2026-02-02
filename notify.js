@@ -49,6 +49,33 @@ function truncateSummary(text) {
 }
 
 /**
+ * Normalize summary to plain text
+ * @param {string} text - Raw summary text
+ * @returns {string} Plain text summary
+ */
+function normalizeSummary(text) {
+  if (!text) {
+    return '';
+  }
+
+  let cleaned = text;
+  cleaned = cleaned.replace(/cite.*?/g, '');
+  cleaned = cleaned.replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1');
+  cleaned = cleaned.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+  cleaned = cleaned.replace(/```/g, '');
+  cleaned = cleaned.replace(/`/g, '');
+  cleaned = cleaned.replace(/^\s*#{1,6}\s+/gm, '');
+  cleaned = cleaned.replace(/^\s*>\s?/gm, '');
+  cleaned = cleaned.replace(/^\s*[-*+]\s+/gm, '');
+  cleaned = cleaned.replace(/^\s*\d+\.\s+/gm, '');
+  cleaned = cleaned.replace(/\*\*/g, '');
+  cleaned = cleaned.replace(/\*/g, '');
+  cleaned = cleaned.replace(/[ \t]+/g, ' ');
+  cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+  return cleaned.trim();
+}
+
+/**
  * Read hook data from stdin (for Claude Code)
  * @returns {Promise<Object|null>} Parsed hook data or null
  */
@@ -123,7 +150,7 @@ function extractSummary(transcriptPath) {
             .join(' ');
 
           if (textContent.length > 10) {
-            return truncateSummary(textContent);
+            return truncateSummary(normalizeSummary(textContent));
           }
         }
       } catch {
@@ -152,9 +179,11 @@ async function parseInput() {
         process.exit(0);
       }
 
+      const rawSummary = event['last-assistant-message'] || 'Codex CLI session completed';
+
       return {
         source: 'codex',
-        summary: truncateSummary(event['last-assistant-message'] || 'Codex CLI session completed'),
+        summary: truncateSummary(normalizeSummary(rawSummary)),
         cwd: event.cwd || process.cwd(),
         transcriptPath: null
       };
