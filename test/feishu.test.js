@@ -1,8 +1,21 @@
-import { describe, it, beforeEach, afterEach, mock } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { sendFeishuNotification } from '../notifiers/feishu.js';
 
 describe('sendFeishuNotification', () => {
+  let originalFetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+  });
+
+  afterEach(() => {
+    if (originalFetch === undefined) {
+      delete globalThis.fetch;
+    } else {
+      globalThis.fetch = originalFetch;
+    }
+  });
 
   it('should reject unconfigured webhook URL', async () => {
     const result = await sendFeishuNotification({
@@ -25,6 +38,9 @@ describe('sendFeishuNotification', () => {
   });
 
   it('should handle network errors gracefully', async () => {
+    globalThis.fetch = async () => {
+      throw new Error('Network error');
+    };
     const result = await sendFeishuNotification({
       webhookUrl: 'http://localhost:1/unreachable',
       title: 'Test',
@@ -34,13 +50,33 @@ describe('sendFeishuNotification', () => {
     assert.ok(result.error.length > 0);
   });
 
-  it('should handle timeout via AbortSignal', { timeout: 15000 }, async () => {
-    // This test just verifies the function doesn't crash with a bad URL
+  it('should handle abort errors gracefully', async () => {
+    globalThis.fetch = async () => {
+      const error = new Error('Request aborted');
+      error.name = 'AbortError';
+      throw error;
+    };
     const result = await sendFeishuNotification({
-      webhookUrl: 'http://192.0.2.1/timeout-test',  // RFC 5737 TEST-NET, will timeout
+      webhookUrl: 'http://example.com/abort-test',
       title: 'Test',
       content: 'Hello'
     });
     assert.strictEqual(result.success, false);
+  });
+
+  it('should handle non-200 responses', async () => {
+    globalThis.fetch = async () => ({
+      ok: false,
+      status: 500,
+      statusText: 'Server Error',
+      json: async () => ({})
+    });
+    const result = await sendFeishuNotification({
+      webhookUrl: 'http://example.com/server-error',
+      title: 'Test',
+      content: 'Hello'
+    });
+    assert.strictEqual(result.success, false);
+    assert.match(result.error, /HTTP 500/);
   });
 });

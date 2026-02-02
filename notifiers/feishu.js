@@ -3,6 +3,117 @@
  * Sends rich text messages to Feishu via Webhook
  */
 
+import { request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
+
+const REQUEST_TIMEOUT_MS = 10000;
+
+async function postJson(url, payload, timeoutMs) {
+  if (typeof fetch === 'function') {
+    return postJsonWithFetch(url, payload, timeoutMs);
+  }
+  return postJsonWithNode(url, payload, timeoutMs);
+}
+
+async function postJsonWithFetch(url, payload, timeoutMs) {
+  const options = {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(payload)
+  };
+
+  let response;
+  if (typeof AbortController === 'function') {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      response = await fetch(url, { ...options, signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+  } else {
+    let timer = null;
+    const timeoutPromise = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('Request timed out')), timeoutMs);
+    });
+    try {
+      response = await Promise.race([fetch(url, options), timeoutPromise]);
+    } finally {
+      if (timer) {
+        clearTimeout(timer);
+      }
+    }
+  }
+
+  let json = null;
+  try {
+    json = await response.json();
+  } catch {
+    json = null;
+  }
+
+  return {
+    ok: response.ok,
+    status: response.status,
+    statusText: response.statusText,
+    json
+  };
+}
+
+function postJsonWithNode(url, payload, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      reject(new Error(`Unsupported protocol: ${parsed.protocol}`));
+      return;
+    }
+
+    const requestFn = parsed.protocol === 'https:' ? httpsRequest : httpRequest;
+    const data = JSON.stringify(payload);
+
+    const req = requestFn({
+      protocol: parsed.protocol,
+      hostname: parsed.hostname,
+      port: parsed.port,
+      path: `${parsed.pathname}${parsed.search}`,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(data)
+      }
+    }, (res) => {
+      let body = '';
+      res.setEncoding('utf-8');
+      res.on('data', (chunk) => {
+        body += chunk;
+      });
+      res.on('end', () => {
+        let json = null;
+        try {
+          json = body ? JSON.parse(body) : null;
+        } catch {
+          json = null;
+        }
+        resolve({
+          ok: res.statusCode >= 200 && res.statusCode < 300,
+          status: res.statusCode || 0,
+          statusText: res.statusMessage || '',
+          json
+        });
+      });
+    });
+
+    req.on('error', reject);
+    req.setTimeout(timeoutMs, () => {
+      req.destroy(new Error('Request timed out'));
+    });
+    req.write(data);
+    req.end();
+  });
+}
+
 /**
  * Send notification to Feishu webhook
  * @param {Object} options - Notification options
@@ -88,20 +199,17 @@ export async function sendFeishuNotification({ webhookUrl, title, content, trans
   };
 
   try {
-    const response = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(message),
-      signal: AbortSignal.timeout(10000)
-    });
+    const response = await postJson(webhookUrl, message, REQUEST_TIMEOUT_MS);
 
     if (!response.ok) {
       return { success: false, error: `HTTP ${response.status}: ${response.statusText}` };
     }
 
-    const result = await response.json();
+    if (!response.json) {
+      return { success: false, error: 'Invalid JSON response' };
+    }
+
+    const result = response.json;
 
     if (result.code === 0 || result.StatusCode === 0) {
       return { success: true };

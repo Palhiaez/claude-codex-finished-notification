@@ -27,12 +27,7 @@ function escapeForXml(str) {
 function escapeForPowerShell(str) {
   return str
     .replace(/`/g, '``')
-    .replace(/"/g, '`"')
-    .replace(/\$/g, '`$')
-    .replace(/\n/g, '`n')
-    .replace(/'/g, "''")
-    .replace(/#/g, '`#')
-    .replace(/;/g, '`;');
+    .replace(/\$/g, '`$');
 }
 
 /**
@@ -44,9 +39,9 @@ function escapeForPowerShell(str) {
  * @returns {Promise<{success: boolean, error?: string}>}
  */
 export async function sendWindowsNotification({ title, message, source = 'claude' }) {
-  // Apply both XML and PowerShell escaping for safe embedding
-  const safeTitle = escapeForPowerShell(escapeForXml(title));
-  const safeMessage = escapeForPowerShell(escapeForXml(message));
+  // Escape PowerShell interpolation first, then XML entities
+  const safeTitle = escapeForXml(escapeForPowerShell(title));
+  const safeMessage = escapeForXml(escapeForPowerShell(message));
   const appName = source === 'codex' ? 'Codex CLI' : 'Claude Code';
 
   // PowerShell script to show Windows toast notification
