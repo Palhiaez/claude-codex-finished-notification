@@ -6,26 +6,48 @@
 import { spawn } from 'node:child_process';
 
 /**
+ * Escape string for safe XML content embedding
+ * @param {string} str - Raw string
+ * @returns {string} XML-safe string
+ */
+function escapeForXml(str) {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+/**
+ * Escape string for safe PowerShell here-string embedding
+ * @param {string} str - Raw string
+ * @returns {string} PowerShell-safe string
+ */
+function escapeForPowerShell(str) {
+  return str
+    .replace(/`/g, '``')
+    .replace(/"/g, '`"')
+    .replace(/\$/g, '`$')
+    .replace(/\n/g, '`n')
+    .replace(/'/g, "''")
+    .replace(/#/g, '`#')
+    .replace(/;/g, '`;');
+}
+
+/**
  * Send notification to Windows desktop via PowerShell
  * @param {Object} options - Notification options
  * @param {string} options.title - Notification title
  * @param {string} options.message - Notification message
- * @param {number} [options.displayMs=5000] - Display duration in milliseconds
  * @param {string} [options.source] - Source: 'claude' or 'codex'
  * @returns {Promise<{success: boolean, error?: string}>}
  */
-export async function sendWindowsNotification({ title, message, displayMs = 5000, source = 'claude' }) {
-  // Escape special characters for PowerShell
-  const escapeForPowerShell = (str) => {
-    return str
-      .replace(/`/g, '``')
-      .replace(/"/g, '`"')
-      .replace(/\$/g, '`$')
-      .replace(/\n/g, '`n');
-  };
-
-  const escapedTitle = escapeForPowerShell(title);
-  const escapedMessage = escapeForPowerShell(message);
+export async function sendWindowsNotification({ title, message, source = 'claude' }) {
+  // Apply both XML and PowerShell escaping for safe embedding
+  const safeTitle = escapeForPowerShell(escapeForXml(title));
+  const safeMessage = escapeForPowerShell(escapeForXml(message));
+  const appName = source === 'codex' ? 'Codex CLI' : 'Claude Code';
 
   // PowerShell script to show Windows toast notification
   const psScript = `
@@ -36,8 +58,8 @@ $template = @"
 <toast duration="short">
   <visual>
     <binding template="ToastText02">
-      <text id="1">${escapedTitle}</text>
-      <text id="2">${escapedMessage}</text>
+      <text id="1">${safeTitle}</text>
+      <text id="2">${safeMessage}</text>
     </binding>
   </visual>
   <audio silent="true"/>
@@ -47,19 +69,28 @@ $template = @"
 $xml = New-Object Windows.Data.Xml.Dom.XmlDocument
 $xml.LoadXml($template)
 $toast = [Windows.UI.Notifications.ToastNotification]::new($xml)
-$notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("${source === 'codex' ? 'Codex CLI' : 'Claude Code'}")
+$notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("${appName}")
 $notifier.Show($toast)
 `;
 
   return new Promise((resolve) => {
+    let resolved = false;
+
+    const done = (result) => {
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timer);
+        resolve(result);
+      }
+    };
+
     const powershell = spawn('powershell.exe', [
       '-NoProfile',
       '-NonInteractive',
       '-Command',
       psScript
     ], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      timeout: 10000
+      stdio: ['ignore', 'pipe', 'pipe']
     });
 
     let stderr = '';
@@ -70,20 +101,19 @@ $notifier.Show($toast)
 
     powershell.on('close', (code) => {
       if (code === 0) {
-        resolve({ success: true });
+        done({ success: true });
       } else {
-        resolve({ success: false, error: stderr || `Exit code: ${code}` });
+        done({ success: false, error: stderr || `Exit code: ${code}` });
       }
     });
 
     powershell.on('error', (error) => {
-      resolve({ success: false, error: error.message });
+      done({ success: false, error: error.message });
     });
 
-    // Timeout fallback
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       powershell.kill();
-      resolve({ success: false, error: 'Notification timed out' });
+      done({ success: false, error: 'Notification timed out' });
     }, 10000);
   });
 }

@@ -16,6 +16,7 @@ import { sendFeishuNotification } from './notifiers/feishu.js';
 import { sendWindowsNotification } from './notifiers/windows.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const MAX_SUMMARY_LENGTH = 500;
 
 /**
  * Load configuration from config.json
@@ -30,9 +31,21 @@ function loadConfig() {
     console.error(`Failed to load config: ${error.message}`);
     return {
       feishu: { enabled: false },
-      windows: { enabled: true, displayMs: 5000 }
+      windows: { enabled: true }
     };
   }
+}
+
+/**
+ * Truncate summary to max length
+ * @param {string} text - Raw summary text
+ * @returns {string} Truncated text
+ */
+function truncateSummary(text) {
+  if (text.length > MAX_SUMMARY_LENGTH) {
+    return text.substring(0, MAX_SUMMARY_LENGTH) + '...';
+  }
+  return text;
 }
 
 /**
@@ -42,9 +55,19 @@ function loadConfig() {
 async function readStdin() {
   return new Promise((resolve) => {
     let data = '';
+    let resolved = false;
+
+    const done = (value) => {
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timeout);
+        resolve(value);
+      }
+    };
 
     const timeout = setTimeout(() => {
-      resolve(null);
+      process.stdin.destroy();
+      done(null);
     }, 3000);
 
     process.stdin.setEncoding('utf-8');
@@ -54,26 +77,23 @@ async function readStdin() {
     });
 
     process.stdin.on('end', () => {
-      clearTimeout(timeout);
       if (data.trim()) {
         try {
-          resolve(JSON.parse(data));
+          done(JSON.parse(data));
         } catch {
-          resolve(null);
+          done(null);
         }
       } else {
-        resolve(null);
+        done(null);
       }
     });
 
     process.stdin.on('error', () => {
-      clearTimeout(timeout);
-      resolve(null);
+      done(null);
     });
 
     if (process.stdin.readableEnded) {
-      clearTimeout(timeout);
-      resolve(null);
+      done(null);
     }
   });
 }
@@ -103,17 +123,15 @@ function extractSummary(transcriptPath) {
             .join(' ');
 
           if (textContent.length > 10) {
-            return textContent.length > 200
-              ? textContent.substring(0, 200) + '...'
-              : textContent;
+            return truncateSummary(textContent);
           }
         }
       } catch {
         continue;
       }
     }
-  } catch {
-    // Ignore read errors
+  } catch (error) {
+    console.warn(`[Notify] Could not read transcript: ${error.message}`);
   }
 
   return 'Claude Code session completed';
@@ -136,7 +154,7 @@ async function parseInput() {
 
       return {
         source: 'codex',
-        summary: event['last-assistant-message'] || 'Codex CLI session completed',
+        summary: truncateSummary(event['last-assistant-message'] || 'Codex CLI session completed'),
         cwd: event.cwd || process.cwd(),
         transcriptPath: null
       };
@@ -191,7 +209,6 @@ async function main() {
       sendWindowsNotification({
         title,
         message: summary,
-        displayMs: config.windows.displayMs,
         source
       }).then(result => ({ channel: 'Windows', ...result }))
     );
@@ -202,13 +219,19 @@ async function main() {
     return;
   }
 
-  const results = await Promise.all(notifications);
+  // Use allSettled to ensure one failure does not block others
+  const results = await Promise.allSettled(notifications);
 
   for (const result of results) {
-    if (result.success) {
-      console.log(`[${result.channel}] Notification sent successfully`);
+    if (result.status === 'fulfilled') {
+      const val = result.value;
+      if (val.success) {
+        console.log(`[${val.channel}] Notification sent successfully`);
+      } else {
+        console.error(`[${val.channel}] Failed: ${val.error}`);
+      }
     } else {
-      console.error(`[${result.channel}] Failed: ${result.error}`);
+      console.error(`[Notify] Unexpected error: ${result.reason}`);
     }
   }
 }

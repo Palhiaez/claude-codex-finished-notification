@@ -5,7 +5,9 @@
   "main": "notify.js",
   "type": "module",
   "scripts": {
-    "test": "echo '{\"event\":\"stop\",\"transcript_path\":\"/tmp/test.jsonl\"}' | node notify.js"
+    "test": "node --test 'test/*.test.js'",
+    "check": "node --check notify.js && node --check notifiers/feishu.js && node --check notifiers/windows.js",
+    "smoke": "echo '{\"event\":\"stop\",\"transcript_path\":\"/tmp/test.jsonl\"}' | node notify.js"
   },
   "keywords": [
     "claude-code",

@@ -93,8 +93,13 @@ export async function sendFeishuNotification({ webhookUrl, title, content, trans
       headers: {
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify(message)
+      body: JSON.stringify(message),
+      signal: AbortSignal.timeout(10000)
     });
+
+    if (!response.ok) {
+      return { success: false, error: `HTTP ${response.status}: ${response.statusText}` };
+    }
 
     const result = await response.json();
 
