@@ -254,9 +254,7 @@ async function main() {
   for (const result of results) {
     if (result.status === 'fulfilled') {
       const val = result.value;
-      if (val.success) {
-        console.log(`[${val.channel}] Notification sent successfully`);
-      } else {
+      if (!val.success) {
         console.error(`[${val.channel}] Failed: ${val.error}`);
       }
     } else {
